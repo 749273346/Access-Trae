@@ -62,6 +62,10 @@ with col1:
                 clipper = VideoClipper()
                 # Force mock update based on UI toggle
                 clipper.use_mock = use_mock
+
+                normalized_url, url_note = clipper.normalize_url(url)
+                if url_note:
+                    st.info(url_note)
                 
                 refinery = ContentRefinery()
                 refinery.use_mock = use_mock
@@ -70,7 +74,7 @@ with col1:
 
                 with st.status("Processing...", expanded=True) as status:
                     st.write("📥 Fetching transcript from video...")
-                    transcript = clipper.get_transcript(url)
+                    transcript = clipper.get_transcript(normalized_url)
                     st.write("✅ Transcript acquired.")
                     
                     st.write("🧠 Analyzing content with AI...")
@@ -80,7 +84,7 @@ with col1:
                     st.write("💾 Saving to local library...")
                     # Generate a simple title hint from URL or content
                     title_hint = "video_note"
-                    if "python" in url.lower(): title_hint = "python_tutorial"
+                    if "python" in normalized_url.lower(): title_hint = "python_tutorial"
                     
                     file_path = storage.save_markdown(markdown_content, title_hint)
                     st.write(f"✅ Saved to: {file_path}")

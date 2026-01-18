@@ -1,0 +1,57 @@
+{
+  "name": "trae-doubao-bridge",
+  "displayName": "Trae Doubao Bridge",
+  "description": "Access your Doubao clips directly in Trae",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "trae-doubao-explorer",
+          "title": "Doubao Clips",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "trae-doubao-explorer": [
+        {
+          "id": "traeDoubaoClips",
+          "name": "Saved Clips"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "traeDoubao.insertClip",
+        "title": "Insert Clip"
+      },
+      {
+        "command": "traeDoubao.refresh",
+        "title": "Refresh"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "traeDoubao.refresh",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "traeDoubao.insertClip",
+          "group": "inline"
+        }
+      ]
+    }
+  }
+}
