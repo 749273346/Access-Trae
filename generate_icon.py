@@ -74,3 +74,14 @@ if __name__ == "__main__":
     ico_path = os.path.join("assets", "app_icon.ico")
     img.save(ico_path, format='ICO', sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)])
     print(f"Saved {ico_path}")
+
+    # Save extension icons
+    extension_dir = "trae-extension"
+    if not os.path.exists(extension_dir):
+        os.makedirs(extension_dir)
+
+    for size in [16, 48, 128]:
+        # Generate fresh icon for each size to ensure crisp rendering
+        icon = create_icon(size)
+        icon.save(os.path.join(extension_dir, f"icon{size}.png"), "PNG")
+    print(f"Saved extension icons to {extension_dir}")

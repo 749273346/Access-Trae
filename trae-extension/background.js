@@ -98,6 +98,88 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 });
 
+async function setToast(tabId, { text, background, ttlMs }) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: ({ text, background, ttlMs }) => {
+        const toastId = "trae-processing-toast";
+        let toast = document.getElementById(toastId);
+        if (!toast) {
+          toast = document.createElement("div");
+          toast.id = toastId;
+          toast.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #2196F3;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 4px;
+            z-index: 999999;
+            font-family: sans-serif;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            transition: opacity 0.5s;
+            max-width: 360px;
+            line-height: 1.3;
+            word-break: break-word;
+          `;
+          document.body.appendChild(toast);
+        }
+        if (background) toast.style.background = background;
+        toast.textContent = text || "";
+        toast.style.opacity = "1";
+        if (typeof ttlMs === "number" && ttlMs > 0) {
+          setTimeout(() => {
+            toast.style.opacity = "0";
+            setTimeout(() => toast.remove(), 500);
+          }, ttlMs);
+        }
+      },
+      args: [{ text, background, ttlMs }]
+    });
+  } catch (_) {}
+}
+
+async function pollTask({ serverUrl, taskId, tabId }) {
+  const start = Date.now();
+  const timeoutMs = 60000;
+  while (Date.now() - start < timeoutMs) {
+    let data = null;
+    try {
+      const r = await fetch(`${serverUrl}/api/task/${encodeURIComponent(taskId)}`, { cache: "no-store" });
+      if (!r.ok) throw new Error("Task status " + r.status);
+      data = await r.json();
+    } catch (e) {
+      await setToast(tabId, { text: "❌ Error: " + (e?.message || "poll failed"), background: "#f44336", ttlMs: 6000 });
+      return;
+    }
+
+    const status = data?.status;
+    if (status === "queued" || status === "processing") {
+      await setToast(tabId, { text: "⏳ Processing with Trae...", background: "#2196F3" });
+      await new Promise((r) => setTimeout(r, 900));
+      continue;
+    }
+
+    if (status === "saved") {
+      const warning = data?.warning ? `\n${data.warning}` : "";
+      await setToast(tabId, { text: "✅ Saved to Trae!" + warning, background: warning ? "#FF9800" : "#4CAF50", ttlMs: 4500 });
+      return;
+    }
+
+    if (status === "error") {
+      await setToast(tabId, { text: "❌ Error: " + (data?.error || "unknown"), background: "#f44336", ttlMs: 6500 });
+      return;
+    }
+
+    await setToast(tabId, { text: "❌ Error: Unknown task status", background: "#f44336", ttlMs: 6500 });
+    return;
+  }
+
+  await setToast(tabId, { text: "❌ Error: Timeout waiting for result", background: "#f44336", ttlMs: 6500 });
+}
+
 async function handleClip(targetUrl, tab) {
   const settings = await chrome.storage.local.get({
     mode: 'raw',
@@ -119,33 +201,7 @@ async function handleClip(targetUrl, tab) {
   };
 
   try {
-    chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        const toastId = 'trae-processing-toast';
-        let toast = document.getElementById(toastId);
-        if (!toast) {
-          toast = document.createElement('div');
-          toast.id = toastId;
-          toast.style.cssText = `
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #2196F3;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 4px;
-            z-index: 999999;
-            font-family: sans-serif;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            transition: opacity 0.5s;
-          `;
-          document.body.appendChild(toast);
-        }
-        toast.textContent = "⏳ Processing with Trae...";
-        toast.style.opacity = '1';
-      }
-    }).catch(() => {});
+    await setToast(tab.id, { text: "⏳ Processing with Trae...", background: "#2196F3" });
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 20000);
@@ -160,43 +216,18 @@ async function handleClip(targetUrl, tab) {
     }).finally(() => clearTimeout(timeoutId));
 
     if (response.ok) {
-      chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => {
-          const toast = document.getElementById('trae-processing-toast');
-          if (toast) {
-            toast.style.background = '#4CAF50';
-            toast.textContent = "✅ Saved to Trae!";
-            setTimeout(() => {
-              toast.style.opacity = '0';
-              setTimeout(() => toast.remove(), 500);
-            }, 3000);
-          } else {
-            alert("✅ Saved to Trae!");
-          }
-        }
-      });
+      const data = await response.json().catch(() => ({}));
+      const taskId = data?.task_id;
+      if (!taskId) {
+        await setToast(tab.id, { text: "✅ Saved to Trae!", background: "#4CAF50", ttlMs: 3500 });
+        return;
+      }
+      await pollTask({ serverUrl, taskId, tabId: tab.id });
     } else {
       throw new Error('Server returned ' + response.status);
     }
   } catch (error) {
     console.error(error);
-    chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: (msg) => {
-        const toast = document.getElementById('trae-processing-toast');
-        if (toast) {
-          toast.style.background = '#f44336';
-          toast.textContent = "❌ Error: " + msg;
-          setTimeout(() => {
-            toast.style.opacity = '0';
-            setTimeout(() => toast.remove(), 500);
-          }, 5000);
-        } else {
-          alert("❌ Error: " + msg + "\nIs server.py running?");
-        }
-      },
-      args: [error.message]
-    });
+    await setToast(tab.id, { text: "❌ Error: " + (error?.message || "unknown"), background: "#f44336", ttlMs: 6500 });
   }
 }

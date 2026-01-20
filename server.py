@@ -6,6 +6,8 @@ import time
 import uvicorn
 from typing import Optional
 import sys
+import uuid
+import threading
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -33,6 +35,9 @@ DEFAULT_SAVE_DIR = os.path.join(BASE_DIR, "materials")
 if not os.path.exists(DEFAULT_SAVE_DIR):
     os.makedirs(DEFAULT_SAVE_DIR)
 
+_tasks_lock = threading.Lock()
+_tasks: dict[str, dict] = {}
+
 class ClipRequest(BaseModel):
     url: str
     mode: str = "raw"  # "raw" or "ai_rewrite"
@@ -41,8 +46,19 @@ class ClipRequest(BaseModel):
     base_url: Optional[str] = None
     save_path: Optional[str] = None
 
-def process_and_save(request: ClipRequest):
-    print(f"[Server] Processing URL: {request.url} | Mode: {request.mode}")
+def _set_task(task_id: str, patch: dict):
+    with _tasks_lock:
+        cur = _tasks.get(task_id) or {}
+        cur.update(patch)
+        _tasks[task_id] = cur
+
+def _is_auth_error(text: str) -> bool:
+    t = (text or "").lower()
+    return ("error code: 401" in t) or ("authentication fails" in t) or ("authentication_error" in t)
+
+def process_and_save(task_id: str, request: ClipRequest):
+    _set_task(task_id, {"status": "processing", "started_at": time.time()})
+    print(f"[Server] Processing URL: {request.url} | Mode: {request.mode} | Task: {task_id}")
     
     try:
         raw_data = extractor.extract(request.url)
@@ -57,13 +73,23 @@ def process_and_save(request: ClipRequest):
             api_key=request.api_key,
             base_url=request.base_url
         )
+        warning = None
+        if request.mode == "ai_rewrite" and _is_auth_error(final_content):
+            final_content = refinery.refine_content(
+                data=raw_data,
+                mode="raw",
+                model=request.model,
+                api_key=request.api_key,
+                base_url=request.base_url
+            )
+            warning = "AI 处理失败（API Key 无效或无权限），已自动降级为 Raw 保存。"
 
         metadata = refinery.generate_metadata(
             data=raw_data,
             model=request.model,
             api_key=request.api_key,
             base_url=request.base_url,
-            use_ai=True
+            use_ai=bool(request.api_key or os.getenv("OPENAI_API_KEY"))
         )
         
         category = metadata.get('category') or "其他"
@@ -93,10 +119,11 @@ def process_and_save(request: ClipRequest):
             f.write(final_content)
             
         print(f"[Server] Saved to: {filepath}")
+        _set_task(task_id, {"status": "saved", "filepath": filepath, "warning": warning, "finished_at": time.time()})
         
     except Exception as e:
         print(f"[Server] Error processing task: {e}")
-        # Optionally write an error log file
+        _set_task(task_id, {"status": "error", "error": str(e), "finished_at": time.time()})
 
 @app.post("/api/clip")
 async def handle_clip(request: ClipRequest, background_tasks: BackgroundTasks):
@@ -108,13 +135,23 @@ async def handle_clip(request: ClipRequest, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=400, detail="URL is required")
 
     # Add to background task to avoid blocking the extension
-    background_tasks.add_task(process_and_save, request)
+    task_id = str(uuid.uuid4())
+    _set_task(task_id, {"status": "queued", "created_at": time.time(), "url": request.url, "mode": request.mode})
+    background_tasks.add_task(process_and_save, task_id, request)
     
-    return {"status": "queued", "message": "Task started in background"}
+    return {"status": "queued", "task_id": task_id}
+
+@app.get("/api/task/{task_id}")
+async def get_task(task_id: str):
+    with _tasks_lock:
+        task = _tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "version": "2.1"}
+    return {"status": "ok", "version": "2.2"}
 
 if __name__ == "__main__":
     print(f"Server starting on http://localhost:18000")

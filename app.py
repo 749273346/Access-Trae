@@ -33,7 +33,7 @@ if 'last_saved_file' not in st.session_state:
 # Custom CSS for Browser Look
 st.markdown("""
 <style>
-    .block-container { padding-top: 1rem; padding-bottom: 0rem; }
+    .block-container { padding-top: 4rem; padding-bottom: 0rem; }
     iframe { border: 1px solid #333; border-radius: 8px; }
     .stButton button { width: 100%; }
 </style>
