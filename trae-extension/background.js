@@ -98,45 +98,226 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 });
 
-async function setToast(tabId, { text, background, ttlMs }) {
+async function setToast(tabId, { text, type = 'info', ttlMs }) {
   try {
+    // 1. Inject Navigation Hook in MAIN world (for SPA support)
+    chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: () => {
+        if (window.__traeMainNavHooked) return;
+        window.__traeMainNavHooked = true;
+        
+        const suppressAndRemoveToast = () => {
+          try {
+            document.documentElement.dataset.traeToastSuppressed = "1";
+          } catch (_) {}
+          const t = document.getElementById("trae-processing-toast");
+          if (t) t.remove();
+        };
+
+        const h = window.history;
+        const push = h.pushState;
+        const rep = h.replaceState;
+        
+        h.pushState = function(...args) {
+          const res = push.apply(this, args);
+          suppressAndRemoveToast();
+          return res;
+        };
+        
+        h.replaceState = function(...args) {
+          const res = rep.apply(this, args);
+          suppressAndRemoveToast();
+          return res;
+        };
+
+        let lastHref = location.href;
+        window.setInterval(() => {
+          const cur = location.href;
+          if (cur !== lastHref) {
+            lastHref = cur;
+            suppressAndRemoveToast();
+          }
+        }, 250);
+      }
+    }).catch(() => {});
+
+    // 2. Inject Toast UI in ISOLATED world
     await chrome.scripting.executeScript({
       target: { tabId },
-      func: ({ text, background, ttlMs }) => {
+      func: ({ text, type, ttlMs }) => {
         const toastId = "trae-processing-toast";
+        const styleId = "trae-toast-styles";
+
+        const removeToastNow = () => {
+          const t = document.getElementById(toastId);
+          if (t) t.remove();
+        };
+
+        if (!window.__traeToastNavHooked) {
+          window.__traeToastNavHooked = true;
+          const suppressAndRemove = () => {
+            try {
+              document.documentElement.dataset.traeToastSuppressed = "1";
+            } catch (_) {}
+            removeToastNow();
+          };
+          window.addEventListener("hashchange", suppressAndRemove, true);
+          window.addEventListener("popstate", suppressAndRemove, true);
+          window.addEventListener("pagehide", suppressAndRemove, true);
+        }
+        
+        const suppressed = document.documentElement?.dataset?.traeToastSuppressed === "1";
+        if (suppressed) {
+          removeToastNow();
+          return;
+        }
+
+        // 1. Inject Styles (Idempotent)
+        const styleText = `
+            @keyframes traeSlideIn {
+              from { transform: translateY(-20px) scale(0.8); opacity: 0; }
+              to { transform: translateY(0) scale(1); opacity: 1; }
+            }
+            @keyframes traeFadeOut {
+              from { opacity: 1; transform: scale(1); }
+              to { opacity: 0; transform: scale(0.8); }
+            }
+            @keyframes traePulse {
+              0% { transform: scale(1); opacity: 1; }
+              50% { transform: scale(1.15); opacity: 0.8; }
+              100% { transform: scale(1); opacity: 1; }
+            }
+            .trae-toast {
+              position: fixed;
+              top: 24px;
+              right: 24px;
+              z-index: 2147483647;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              pointer-events: none; /* Let clicks pass through */
+              transition: all 0.3s ease;
+            }
+            .trae-toast-icon {
+              width: 32px;
+              height: 32px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+            }
+            .trae-toast-icon svg {
+              width: 100%;
+              height: 100%;
+            }
+            .trae-toast.show {
+              animation: traeSlideIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            }
+            .trae-toast.hiding {
+              animation: traeFadeOut 0.3s ease forwards;
+            }
+            
+            /* Theme Colors */
+            .trae-icon-loading { color: #3b82f6; /* Blue */ }
+            .trae-icon-success { color: #22c55e; /* Green */ }
+            .trae-icon-error   { color: #ef4444; /* Red */ }
+            .trae-icon-warning { color: #f59e0b; /* Amber */ }
+
+            /* Pulse Animation for Loading */
+            .trae-pulse {
+              animation: traePulse 1.5s infinite ease-in-out;
+            }
+          `;
+        let style = document.getElementById(styleId);
+        if (!style) {
+          style = document.createElement("style");
+          style.id = styleId;
+          document.head.appendChild(style);
+        }
+        if (style.textContent !== styleText) style.textContent = styleText;
+
+        // 2. Icons (SVG)
+        const icons = {
+          // Funnel / Filter Icon for Loading
+          loading: `<svg class="trae-icon-loading trae-pulse" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+            <path d="M10 18H14V16H10V18ZM3 6V8H21V6H3ZM6 13H18V11H6V13Z" />
+          </svg>`,
+          // Minimal Check
+          success: `<svg class="trae-icon-success" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+            <path d="M9 16.17L4.83 12L3.41 13.41L9 19L21 7L19.59 5.59L9 16.17Z" />
+          </svg>`,
+          // Minimal Alert
+          error: `<svg class="trae-icon-error" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+             <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V15H13V17ZM13 13H11V7H13V13Z" />
+          </svg>`,
+          warning: `<svg class="trae-icon-warning" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1 21H23L12 2L1 21ZM13 18H11V16H13V18ZM13 14H11V10H13V14Z" />
+          </svg>`
+        };
+
+        // 3. Create or Get Toast
         let toast = document.getElementById(toastId);
         if (!toast) {
           toast = document.createElement("div");
           toast.id = toastId;
-          toast.style.cssText = `
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #2196F3;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 4px;
-            z-index: 999999;
-            font-family: sans-serif;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            transition: opacity 0.5s;
-            max-width: 360px;
-            line-height: 1.3;
-            word-break: break-word;
-          `;
+          toast.className = "trae-toast";
+          // Only Icon, No Text
+          toast.innerHTML = `<div class="trae-toast-icon"></div>`;
           document.body.appendChild(toast);
         }
-        if (background) toast.style.background = background;
-        toast.textContent = text || "";
-        toast.style.opacity = "1";
+
+        // 4. Update Content
+        const iconEl = toast.querySelector('.trae-toast-icon');
+        const nextType = (icons[type] ? type : "loading");
+        if (toast.dataset.traeToastType !== nextType) {
+          toast.dataset.traeToastType = nextType;
+          iconEl.innerHTML = icons[nextType] || icons.loading;
+        }
+        
+        // Remove hiding class if present
+        toast.classList.remove('hiding');
+        toast.classList.add('show');
+        
+        // 5. Timer Logic
+        if (toast.dismissTimeout) clearTimeout(toast.dismissTimeout);
+
+        function hideToast() {
+           toast.classList.add('hiding');
+           toast.addEventListener('animationend', () => {
+             if (toast.classList.contains('hiding')) {
+                toast.remove();
+             }
+           }, { once: true });
+        }
+
         if (typeof ttlMs === "number" && ttlMs > 0) {
-          setTimeout(() => {
-            toast.style.opacity = "0";
-            setTimeout(() => toast.remove(), 500);
-          }, ttlMs);
+           toast.dismissTimeout = setTimeout(() => {
+              hideToast();
+           }, ttlMs);
+        }
+
+        if (!window.__traeToastWheelHooked) {
+          window.__traeToastWheelHooked = true;
+          window.addEventListener(
+            "wheel",
+            () => {
+              const host = location.hostname || "";
+              const shouldDismiss =
+                host.endsWith("douyin.com") || host.endsWith("bilibili.com") || host.endsWith("youtube.com");
+              if (shouldDismiss) {
+                try {
+                  document.documentElement.dataset.traeToastSuppressed = "1";
+                } catch (_) {}
+                removeToastNow();
+              }
+            },
+            { passive: true, capture: true }
+          );
         }
       },
-      args: [{ text, background, ttlMs }]
+      args: [{ text, type, ttlMs }]
     });
   } catch (_) {}
 }
@@ -151,33 +332,32 @@ async function pollTask({ serverUrl, taskId, tabId }) {
       if (!r.ok) throw new Error("Task status " + r.status);
       data = await r.json();
     } catch (e) {
-      await setToast(tabId, { text: "❌ Error: " + (e?.message || "poll failed"), background: "#f44336", ttlMs: 6000 });
+      await setToast(tabId, { text: "", type: "loading", ttlMs: 300 });
       return;
     }
 
     const status = data?.status;
     if (status === "queued" || status === "processing") {
-      await setToast(tabId, { text: "⏳ Processing with Trae...", background: "#2196F3" });
+      await setToast(tabId, { text: "", type: "loading" });
       await new Promise((r) => setTimeout(r, 900));
       continue;
     }
 
     if (status === "saved") {
-      const warning = data?.warning ? `\n${data.warning}` : "";
-      await setToast(tabId, { text: "✅ Saved to Trae!" + warning, background: warning ? "#FF9800" : "#4CAF50", ttlMs: 4500 });
+      await setToast(tabId, { text: "", type: "loading", ttlMs: 300 });
       return;
     }
 
     if (status === "error") {
-      await setToast(tabId, { text: "❌ Error: " + (data?.error || "unknown"), background: "#f44336", ttlMs: 6500 });
+      await setToast(tabId, { text: "", type: "loading", ttlMs: 300 });
       return;
     }
 
-    await setToast(tabId, { text: "❌ Error: Unknown task status", background: "#f44336", ttlMs: 6500 });
+    await setToast(tabId, { text: "", type: "loading", ttlMs: 300 });
     return;
   }
 
-  await setToast(tabId, { text: "❌ Error: Timeout waiting for result", background: "#f44336", ttlMs: 6500 });
+  await setToast(tabId, { text: "", type: "loading", ttlMs: 300 });
 }
 
 async function handleClip(targetUrl, tab) {
@@ -201,7 +381,16 @@ async function handleClip(targetUrl, tab) {
   };
 
   try {
-    await setToast(tab.id, { text: "⏳ Processing with Trae...", background: "#2196F3" });
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        try {
+          document.documentElement.dataset.traeToastSuppressed = "0";
+        } catch (_) {}
+      }
+    }).catch(() => {});
+
+    await setToast(tab.id, { text: "", type: "loading" });
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 20000);
@@ -219,7 +408,7 @@ async function handleClip(targetUrl, tab) {
       const data = await response.json().catch(() => ({}));
       const taskId = data?.task_id;
       if (!taskId) {
-        await setToast(tab.id, { text: "✅ Saved to Trae!", background: "#4CAF50", ttlMs: 3500 });
+        await setToast(tab.id, { text: "", type: "loading", ttlMs: 300 });
         return;
       }
       await pollTask({ serverUrl, taskId, tabId: tab.id });
@@ -228,6 +417,6 @@ async function handleClip(targetUrl, tab) {
     }
   } catch (error) {
     console.error(error);
-    await setToast(tab.id, { text: "❌ Error: " + (error?.message || "unknown"), background: "#f44336", ttlMs: 6500 });
+    await setToast(tab.id, { text: "", type: "loading", ttlMs: 300 });
   }
 }
