@@ -6,14 +6,17 @@ import time
 from dotenv import load_dotenv
 
 # Add current directory to path to import src modules
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(BASE_DIR)
 
 from src.clipper import VideoClipper
 from src.refinery import ContentRefinery
 from src.storage import StorageManager
 
 # Load env variables
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"))
+
+MATERIALS_DIR = os.path.join(BASE_DIR, "materials")
 
 st.set_page_config(
     page_title="Trae Omni-Browser",
@@ -116,7 +119,8 @@ with col_assistant:
         with ac_col1:
             if st.button("💾 Save Context"):
                 # Save to a fixed context file for easy referencing
-                context_file = os.path.join("materials", "active_context.md")
+                os.makedirs(MATERIALS_DIR, exist_ok=True)
+                context_file = os.path.join(MATERIALS_DIR, "active_context.md")
                 with open(context_file, "w", encoding="utf-8") as f:
                     f.write(st.session_state.analysis_result)
                 st.toast("Saved to active_context.md!")
@@ -138,11 +142,11 @@ with col_assistant:
     # 4. Quick Library Access
     st.divider()
     st.subheader("📚 Recent Clips")
-    if os.path.exists("materials"):
-        files = sorted([f for f in os.listdir("materials") if f.endswith(".md")], reverse=True)[:5]
+    if os.path.exists(MATERIALS_DIR):
+        files = sorted([f for f in os.listdir(MATERIALS_DIR) if f.endswith(".md")], reverse=True)[:5]
         for f in files:
             if st.button(f"📄 {f}", key=f):
-                with open(os.path.join("materials", f), "r", encoding="utf-8") as file:
+                with open(os.path.join(MATERIALS_DIR, f), "r", encoding="utf-8") as file:
                     st.session_state.analysis_result = file.read()
-                    st.session_state.last_saved_file = os.path.join("materials", f)
+                    st.session_state.last_saved_file = os.path.join(MATERIALS_DIR, f)
                 st.rerun()

@@ -42,47 +42,70 @@ icon_ref: Optional[pystray.Icon] = None
 status_text = "🔴 服务离线"
 status_detail = "Stopped"
 shutdown_event = threading.Event()
+_watchdog_last_restart_at = 0.0
+_watchdog_lock = threading.Lock()
+_server_started_at = 0.0
+_ui_started_at = 0.0
 
 def log(message):
     print(message)
     logging.info(message)
 
 def start_services(icon=None, item=None):
-    global server_process, streamlit_process, is_running, server_log_handle, app_log_handle
+    global server_process, streamlit_process, is_running, server_log_handle, app_log_handle, _server_started_at, _ui_started_at
 
-    if is_running and _process_running(server_process) and _process_running(streamlit_process):
+    if (
+        (_process_running(server_process) or _tcp_connectable("127.0.0.1", SERVER_PORT, timeout=0.3))
+        and (_process_running(streamlit_process) or _tcp_connectable("127.0.0.1", STREAMLIT_PORT, timeout=0.3))
+    ):
+        is_running = True
         log("Services are already running.")
         _refresh_menu()
         return
 
     log("Starting services...")
 
-    server_log_handle = open(os.path.join(LOG_DIR, "server.log"), "a", encoding="utf-8")
-    app_log_handle = open(os.path.join(LOG_DIR, "app.log"), "a", encoding="utf-8")
+    if server_log_handle is None:
+        server_log_handle = open(os.path.join(LOG_DIR, "server.log"), "a", encoding="utf-8")
+    if app_log_handle is None:
+        app_log_handle = open(os.path.join(LOG_DIR, "app.log"), "a", encoding="utf-8")
 
     try:
-        server_cmd = [sys.executable, "-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", str(SERVER_PORT)]
-        server_process = subprocess.Popen(
-            server_cmd, 
-            cwd=BASE_DIR,
-            stdout=server_log_handle,
-            stderr=server_log_handle,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        )
-        log(f"Server started (PID: {server_process.pid})")
+        started_any = False
 
-        app_cmd = [sys.executable, "-m", "streamlit", "run", "app.py", "--server.port", str(STREAMLIT_PORT), "--server.headless", "true"]
-        streamlit_process = subprocess.Popen(
-            app_cmd, 
-            cwd=BASE_DIR,
-            stdout=app_log_handle,
-            stderr=app_log_handle,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        )
-        log(f"Streamlit started (PID: {streamlit_process.pid})")
+        if not _process_running(server_process) and not _tcp_connectable("127.0.0.1", SERVER_PORT, timeout=0.3):
+            server_cmd = [sys.executable, "-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", str(SERVER_PORT)]
+            server_process = subprocess.Popen(
+                server_cmd,
+                cwd=BASE_DIR,
+                stdout=server_log_handle,
+                stderr=server_log_handle,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+            _server_started_at = time.time()
+            log(f"Server started (PID: {server_process.pid})")
+            started_any = True
+
+        if not _process_running(streamlit_process) and not _tcp_connectable("127.0.0.1", STREAMLIT_PORT, timeout=0.3):
+            app_cmd = [sys.executable, "-m", "streamlit", "run", "app.py", "--server.port", str(STREAMLIT_PORT), "--server.headless", "true"]
+            streamlit_process = subprocess.Popen(
+                app_cmd,
+                cwd=BASE_DIR,
+                stdout=app_log_handle,
+                stderr=app_log_handle,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+            _ui_started_at = time.time()
+            log(f"Streamlit started (PID: {streamlit_process.pid})")
+            started_any = True
         
-        is_running = True
-        if icon:
+        is_running = (
+            _process_running(server_process)
+            or _process_running(streamlit_process)
+            or _tcp_connectable("127.0.0.1", SERVER_PORT, timeout=0.3)
+            or _tcp_connectable("127.0.0.1", STREAMLIT_PORT, timeout=0.3)
+        )
+        if icon and started_any:
             icon.notify("Trae Services Started", "Trae Launcher")
         _refresh_menu()
             
@@ -93,7 +116,7 @@ def start_services(icon=None, item=None):
         _refresh_menu()
 
 def stop_services(icon=None, item=None):
-    global server_process, streamlit_process, is_running, server_log_handle, app_log_handle
+    global server_process, streamlit_process, is_running, server_log_handle, app_log_handle, _server_started_at, _ui_started_at
 
     log("Stopping services...")
 
@@ -117,6 +140,8 @@ def stop_services(icon=None, item=None):
         app_log_handle = None
 
     is_running = False
+    _server_started_at = 0.0
+    _ui_started_at = 0.0
     log("Services stopped.")
     if icon:
         icon.notify("Trae Services Stopped", "Trae Launcher")
@@ -416,6 +441,7 @@ def main():
             time.sleep(2)
 
     threading.Thread(target=poll_status, daemon=True).start()
+    threading.Thread(target=_watchdog_loop, daemon=True).start()
 
     start_services(icon)
 
@@ -429,6 +455,38 @@ def _wait_for_ready(timeout_s: int = 20) -> bool:
             return True
         time.sleep(0.5)
     return False
+
+def _watchdog_loop():
+    global _watchdog_last_restart_at
+    global server_process, streamlit_process
+    global _server_started_at, _ui_started_at
+    while not shutdown_event.is_set():
+        try:
+            if is_running:
+                server_port_ok = _tcp_connectable("127.0.0.1", SERVER_PORT, timeout=0.4)
+                ui_port_ok = _tcp_connectable("127.0.0.1", STREAMLIT_PORT, timeout=0.4)
+                server_ok = server_port_ok and is_server_healthy(timeout=0.8)
+
+                if _process_running(server_process) and not server_port_ok and _server_started_at and (time.time() - _server_started_at) > 15:
+                    log("Watchdog: server process running but port not reachable, restarting server...")
+                    _terminate_process(server_process)
+                    server_process = None
+
+                if _process_running(streamlit_process) and not ui_port_ok and _ui_started_at and (time.time() - _ui_started_at) > 15:
+                    log("Watchdog: streamlit process running but port not reachable, restarting app...")
+                    _terminate_process(streamlit_process)
+                    streamlit_process = None
+
+                if (not server_ok) or (not ui_port_ok):
+                    now = time.time()
+                    with _watchdog_lock:
+                        if now - _watchdog_last_restart_at >= 8:
+                            _watchdog_last_restart_at = now
+                            log("Watchdog: detected service down, attempting to start missing services...")
+                            start_services(icon_ref)
+        except Exception as e:
+            log(f"Watchdog error: {e}")
+        time.sleep(3)
 
 if __name__ == "__main__":
     main()

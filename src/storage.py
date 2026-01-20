@@ -2,7 +2,10 @@ import os
 import time
 
 class StorageManager:
-    def __init__(self, base_dir="materials"):
+    def __init__(self, base_dir=None):
+        if base_dir is None:
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            base_dir = os.path.join(project_root, "materials")
         self.base_dir = base_dir
         if not os.path.exists(self.base_dir):
             os.makedirs(self.base_dir)

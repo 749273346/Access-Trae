@@ -5,7 +5,7 @@ from pydantic import BaseModel
 import os
 import time
 import uvicorn
-from typing import Optional
+from typing import Optional, Dict, Any
 import sys
 import uuid
 import threading
@@ -37,7 +37,7 @@ if not os.path.exists(DEFAULT_SAVE_DIR):
     os.makedirs(DEFAULT_SAVE_DIR)
 
 _tasks_lock = threading.Lock()
-_tasks: dict[str, dict] = {}
+_tasks: Dict[str, Dict[str, Any]] = {}
 
 class ClipRequest(BaseModel):
     url: str
@@ -328,6 +328,12 @@ async def debug_toast():
 </html>"""
 
 if __name__ == "__main__":
-    print(f"Server starting on http://localhost:18000")
+    host = os.getenv("TRAE_SERVER_HOST", "127.0.0.1")
+    port = int(os.getenv("TRAE_SERVER_PORT", "18000"))
+    reload_enabled = os.getenv("TRAE_RELOAD", "").lower() in ("1", "true", "yes", "y")
+    print(f"Server starting on http://{host}:{port}")
     print(f"Default save directory: {DEFAULT_SAVE_DIR}")
-    uvicorn.run(app, host="127.0.0.1", port=18000)
+    if reload_enabled:
+        uvicorn.run("server:app", host=host, port=port, reload=True)
+    else:
+        uvicorn.run(app, host=host, port=port)
