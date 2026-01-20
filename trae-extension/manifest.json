@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "Trae Smart Collector",
+  "version": "2.0",
+  "description": "Use a keyboard shortcut to save web content to Trae with optional AI rewriting.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "scripting"
+  ],
+  "commands": {
+    "save-page": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "MacCtrl+Shift+S"
+      },
+      "description": "Save current page to Trae"
+    }
+  },
+  "host_permissions": [
+    "http://127.0.0.1:*/*",
+    "http://localhost:*/*",
+    "https://*.douyin.com/*",
+    "https://*.iesdouyin.com/*",
+    "https://*.bilibili.com/*",
+    "https://*.youtube.com/*",
+    "https://youtu.be/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}

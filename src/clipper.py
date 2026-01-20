@@ -1,5 +1,5 @@
-import os
 import requests
+from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qs
 from dotenv import load_dotenv
 from .mock_data import MOCK_TRANSCRIPT_PYTHON, MOCK_TRANSCRIPT_GENERIC
@@ -37,11 +37,39 @@ class VideoClipper:
             return "youtube"
         if "bilibili.com" in host:
             return "bilibili"
-        return "unknown"
+        return "generic_web"
+
+    def get_webpage_content(self, url: str) -> str:
+        """
+        Scrapes text content from a generic webpage.
+        """
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, "html.parser")
+            
+            # Remove scripts and styles
+            for script in soup(["script", "style", "nav", "footer", "header"]):
+                script.decompose()
+                
+            # Get text
+            text = soup.get_text(separator="\n")
+            
+            # Clean up empty lines
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            return "\n".join(lines[:5000]) # Limit content size
+            
+        except Exception as e:
+            print(f"[Clipper] Web scraping error: {e}")
+            return f"Error scraping webpage: {str(e)}"
 
     def get_transcript(self, url: str) -> str:
         """
-        Retrieves the transcript for a given video URL.
+        Retrieves the transcript for a given video URL or scrapes webpage content.
         """
         normalized_url, note = self.normalize_url(url)
         if note:
@@ -54,12 +82,17 @@ class VideoClipper:
                 return MOCK_TRANSCRIPT_PYTHON
             return MOCK_TRANSCRIPT_GENERIC
 
-        if not self.api_key:
-            raise ValueError("SUPADATA_API_KEY is not set in .env file.")
-
         platform = self.detect_platform(normalized_url)
+        
+        if platform == "generic_web":
+            print("[Clipper] Detected generic webpage, scraping content...")
+            return self.get_webpage_content(normalized_url)
+
         if platform == "douyin":
             raise NotImplementedError("当前版本尚未接入抖音转写接口。请先使用 Mock 模式或提供 YouTube 链接。")
+
+        if not self.api_key:
+            raise ValueError("SUPADATA_API_KEY is not set in .env file.")
 
         # Real API call implementation (Example)
         try:

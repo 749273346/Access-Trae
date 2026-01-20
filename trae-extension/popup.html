@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 320px;
+      padding: 15px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #1e1e1e;
+      color: #cccccc;
+    }
+    h2 {
+      margin-top: 0;
+      color: #ffffff;
+      font-size: 16px;
+      border-bottom: 1px solid #333;
+      padding-bottom: 10px;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 12px;
+      color: #aaaaaa;
+    }
+    input, select {
+      width: 100%;
+      padding: 8px;
+      background-color: #2d2d2d;
+      border: 1px solid #3e3e3e;
+      color: #ffffff;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #007acc;
+    }
+    .status {
+      margin-top: 15px;
+      padding: 10px;
+      background-color: #252526;
+      border-radius: 4px;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+    }
+    .indicator {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background-color: #666;
+      margin-right: 8px;
+    }
+    .indicator.connected { background-color: #4caf50; }
+    .indicator.error { background-color: #f44336; }
+    
+    .hidden { display: none; }
+    
+    button {
+      width: 100%;
+      padding: 8px;
+      background-color: #0e639c;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    button:hover { background-color: #1177bb; }
+  </style>
+</head>
+<body>
+  <h2>Trae Collector Settings</h2>
+  
+  <div class="form-group">
+    <label>Processing Mode</label>
+    <select id="mode">
+      <option value="raw">Raw Extraction (Fast)</option>
+      <option value="ai_rewrite">AI Blog Rewrite (Slow)</option>
+    </select>
+  </div>
+
+  <div id="ai-settings" class="hidden">
+    <div class="form-group">
+      <label>AI Model</label>
+      <select id="model">
+        <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+        <option value="gpt-4o">GPT-4o</option>
+        <option value="deepseek-chat">DeepSeek V3 (Chat)</option>
+        <option value="deepseek-reasoner">DeepSeek R1 (Full)</option>
+        <option value="claude-3-sonnet">Claude 3.5 Sonnet</option>
+        <option value="ollama">Ollama (Local)</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>API Key (Optional if Env set)</label>
+      <input type="password" id="apiKey" placeholder="sk-...">
+    </div>
+
+    <div class="form-group">
+      <label>Base URL (Optional)</label>
+      <input type="text" id="baseUrl" placeholder="https://api.deepseek.com/v1">
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label>Backend URL</label>
+    <input type="text" id="backendUrl" placeholder="http://127.0.0.1:18000">
+  </div>
+
+  <div class="form-group">
+    <label>Save Path (Absolute Path)</label>
+    <input type="text" id="savePath" placeholder="e:\Working overseas\materials">
+  </div>
+
+  <button id="saveBtn">Save Settings</button>
+
+  <div class="status">
+    <div id="indicator" class="indicator"></div>
+    <span id="statusText">Checking connection...</span>
+  </div>
+
+  <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #333; font-size: 11px; color: #888;">
+    <strong>快捷键使用:</strong><br>
+    按下 <span style="color: #fff; background: #333; padding: 2px 4px; border-radius: 3px;">Alt+Shift+S</span> 即可快速采集当前页面。<br>
+    <a href="#" id="shortcutLink" style="color: #0e639c; text-decoration: none;">自定义快捷键</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
