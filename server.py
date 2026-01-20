@@ -28,7 +28,8 @@ extractor = ContentExtractor()
 refinery = ContentRefinery()
 
 # Default Configuration
-DEFAULT_SAVE_DIR = os.path.join(os.getcwd(), "materials")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_SAVE_DIR = os.path.join(BASE_DIR, "materials")
 if not os.path.exists(DEFAULT_SAVE_DIR):
     os.makedirs(DEFAULT_SAVE_DIR)
 

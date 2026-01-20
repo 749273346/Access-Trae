@@ -2,13 +2,22 @@ import json
 import re
 import time
 from dataclasses import dataclass
-from newspaper import Article
+from newspaper import Article, Config
 from youtube_transcript_api import YouTubeTranscriptApi
 import requests
 from urllib.parse import urlparse, parse_qs
 from urllib.parse import unquote
 
 class ContentExtractor:
+    def __init__(self, request_timeout_s: int = 20):
+        self.request_timeout_s = request_timeout_s
+
+    def _newspaper_config(self) -> Config:
+        cfg = Config()
+        cfg.request_timeout = self.request_timeout_s
+        cfg.browser_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+        return cfg
+
     def extract(self, url: str) -> dict:
         """
         Main entry point. Detects URL type and dispatches to specific extractor.
@@ -49,7 +58,7 @@ class ContentExtractor:
             # 2. Get Metadata (oEmbed; no API key required)
             title, author = self._extract_youtube_oembed(url)
             if not title:
-                article = Article(url)
+                article = Article(url, config=self._newspaper_config())
                 article.download()
                 article.parse()
                 title = article.title or f"YouTube Video ({video_id})"
@@ -242,7 +251,7 @@ class ContentExtractor:
 
     def _extract_web(self, url: str) -> dict:
         try:
-            article = Article(url)
+            article = Article(url, config=self._newspaper_config())
             article.download()
             article.parse()
             
